@@ -18,7 +18,8 @@ def calc_param_size(model):
     '''
     Show the memory cost of model.parameters, in MB.
     '''
-    return np.sum(np.prod(v.size()) for v in model.parameters())*4e-6
+    return np.sum(np.fromiter((np.prod(v.size()) for v in model.parameters()), dtype=np.int64)) * 4e-6
+
 
 def dim_assert(t_list):
     '''
