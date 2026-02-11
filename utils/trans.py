@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from blocks import *
+from utils.blocks import *
 
 from zeta.nn import (
     MambaBlock,

@@ -2,7 +2,7 @@ import torch
 from torch import nn, Tensor
 
 
-from blocks import *
+from utils.blocks import *
 
 
 import numpy as np

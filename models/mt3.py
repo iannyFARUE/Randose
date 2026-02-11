@@ -6,10 +6,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from blocks import *
+from utils.blocks import *
 
 
-from mambat import *
+from utils.mambat import *
 
 class ResidualMambaBlock(nn.Module):
     def __init__(self, input_channels, output_channels, kernel_sizes, stride, norm_op, nonlin, 

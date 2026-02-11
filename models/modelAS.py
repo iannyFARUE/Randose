@@ -6,11 +6,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from blocks import *
+from utils.blocks import *
 
-from mambat import *
+from utils.mambat import *
 
-from se3d import *
+from utils.se3d import *
 
 
 class ResidualMambaBlock(nn.Module):

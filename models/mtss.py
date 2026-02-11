@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from se3d import *
+from utils.se3d import *
 
 import sys
 class ResidualMambaBlock(nn.Module):

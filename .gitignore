@@ -170,3 +170,5 @@ artifacts/*
 *.tar.lzma
 
 models/*__pycache__*/
+
+wandb/

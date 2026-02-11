@@ -6,8 +6,8 @@ if os.path.abspath('..') not in sys.path:
 
 import argparse
 
-from utils import *
-from dose.e_metrics import *
+from utils.utils import *
+from utils.e_metrics import *
 
 from models.mt import *
 
@@ -35,7 +35,7 @@ from models.models import *
 
 from models.mt5 import *
 
-from loss import *
+from utils.loss import *
 import torch
 
 import gc

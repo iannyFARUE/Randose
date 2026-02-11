@@ -4,7 +4,7 @@ from torch import Tensor
 
 from torch import nn
 
-from blocks import *
+from utils.blocks import *
 
 class MambaTransformer(nn.Module):
     def __init__(

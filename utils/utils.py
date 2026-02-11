@@ -2,9 +2,9 @@ import numpy as np
 from torch.nn.functional import interpolate
 import pdb
 
-from e_metrics import *
+from utils.e_metrics import *
 
-from loss import *
+from utils.loss import *
 
 def minmax_normalize(img_npy):
     '''
