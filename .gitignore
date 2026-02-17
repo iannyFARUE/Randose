@@ -172,3 +172,7 @@ artifacts/*
 models/*__pycache__*/
 
 wandb/
+
+OpenKPB_C3D
+
+OpenKBP_C3D/

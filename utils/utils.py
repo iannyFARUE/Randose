@@ -272,10 +272,8 @@ class MyDataset(data.Dataset):
         self.num_samples_per_epoch = num_samples_per_epoch
         self.transform = {'train': train_transform, 'val': val_transform}
 
-        self.list_case_id = {'train': ['OpenKBP_C3D/pt_' + str(i) for i in range(#index
-                                                                                )],
-                              'val': ['YOUR_ROOT/Data/RTDosePrediction/OpenKBP_C3D/pt_' + str(i) for i in range(#index
-                                                                                                                )]}[phase]
+        self.list_case_id = {'train': ['OpenKBP_C3D/pt_' + str(i) for i in range(201)],
+                              'val': ['OpenKBP_C3D/pt_' + str(i) for i in range(201,241)]}[phase]
                              
 
         random.shuffle(self.list_case_id)
@@ -713,8 +711,7 @@ class NetworkTrainer:
 
 
 def online_evaluation(trainer):
-    list_patient_dirs = ['OpenKBP_C3D/pt_' + str(i) for i in range(#index
-                                                                    )]
+    list_patient_dirs = ['OpenKBP_C3D/pt_' + str(i) for i in range(241,341)]
 
     list_Dose_score = []
 
