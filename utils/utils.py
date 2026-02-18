@@ -98,6 +98,8 @@ def random_rotate_around_z_axis(list_images,
 def random_translate(list_images, roi_mask, p, max_shift, list_pad_value):
     if random.random() <= p:
         exist_mask = np.where(roi_mask > 0)
+        if exist_mask[0].size == 0:
+            return list_images
         ori_z, ori_h, ori_w = list_images[0].shape[1:]
 
         bz = min(max_shift - 1, np.min(exist_mask[0]))
@@ -699,11 +701,11 @@ class NetworkTrainer:
 
     def save_wandb(self):
         config = wandb.config
-        config.project_name = self.project_name
-        config.output_dir = self.output_dir = None
-        config.max_iter = self.max_iter
-        config.max_epoch = self.max_epoch
-        config.save_per_epoch = self.save_per_epoch
+        config.project_name = self.setting.project_name
+        config.output_dir = self.setting.output_dir
+        config.max_iter = self.setting.max_iter
+        config.max_epoch = self.setting.max_epoch
+        config.save_per_epoch = self.setting.save_per_epoch
 
 
 # -*- encoding: utf-8 -*-
