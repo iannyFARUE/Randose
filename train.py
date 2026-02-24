@@ -56,8 +56,13 @@ if __name__ == '__main__':
                         help='model to use ')
     parser.add_argument('--project_name', type=str,
                         help='project name')
-    parser.add_argument('--loss',type = str, 
-                        help='loss to use' )
+    parser.add_argument('--loss', type=str,
+                        help='loss to use')
+    parser.add_argument('--resume', type=str, default=None,
+                        help='path to a checkpoint .pkl file to resume training from')
+    parser.add_argument('--checkpoint_gdrive_dir', type=str, default=None,
+                        help='Google Drive directory to mirror checkpoints for persistence, '
+                             'e.g. /content/drive/MyDrive/RANDose_checkpoints')
     args = parser.parse_args()
 
     # Start training
@@ -207,7 +212,21 @@ if __name__ == '__main__':
 
     if not os.path.exists(trainer.setting.output_dir):
         os.mkdir(trainer.setting.output_dir)
+
+    # Configure Google Drive mirroring for persistent checkpoints across Colab sessions
+    if args.checkpoint_gdrive_dir is not None:
+        os.makedirs(args.checkpoint_gdrive_dir, exist_ok=True)
+        trainer.setting.checkpoint_gdrive_dir = args.checkpoint_gdrive_dir
+        print(f'Checkpoints will be mirrored to: {args.checkpoint_gdrive_dir}')
+
     trainer.set_GPU_device(list_GPU_ids)
+
+    # Resume from a checkpoint (restores model weights, optimizer, scheduler, and iteration count)
+    if args.resume is not None:
+        print(f'Resuming training from checkpoint: {args.resume}')
+        trainer.init_trainer(ckpt_file=args.resume, list_GPU_ids=list_GPU_ids, only_network=False)
+        print(f'Resumed at iter {trainer.log.iter}, epoch {trainer.log.epoch}')
+
     trainer.run()
 
     trainer.print_log_to_file('# Done !\n', 'a')

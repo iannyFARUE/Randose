@@ -325,6 +325,10 @@ class TrainerSetting:
         # Path for saving model and training log
         self.output_dir = None
 
+        # Optional: Google Drive directory to persist checkpoints across Colab sessions.
+        # Set this to a mounted Drive path, e.g. '/content/drive/MyDrive/RANDose_checkpoints'
+        self.checkpoint_gdrive_dir = None
+
         # Generally only use one of them
         self.max_iter = 99999999
         self.max_epoch = 99999999
@@ -672,8 +676,16 @@ class NetworkTrainer:
             'log': self.log
         }
 
-        torch.save(ckpt, self.setting.output_dir + '/' + status + '.pkl')
+        local_path = self.setting.output_dir + '/' + status + '.pkl'
+        torch.save(ckpt, local_path)
         self.print_log_to_file('        ==> Saving ' + status + ' model successfully !\n', 'a')
+
+        # Mirror checkpoint to Google Drive for persistent storage across Colab sessions
+        if self.setting.checkpoint_gdrive_dir is not None:
+            import shutil
+            gdrive_path = os.path.join(self.setting.checkpoint_gdrive_dir, status + '.pkl')
+            shutil.copy2(local_path, gdrive_path)
+            self.print_log_to_file('        ==> Mirrored ' + status + ' to Drive: ' + gdrive_path + '\n', 'a')
 
     # Default load trainer in cpu, please reset device using the function self.set_GPU_device
     def init_trainer(self, ckpt_file, list_GPU_ids, only_network=True):
