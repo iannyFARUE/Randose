@@ -5,8 +5,8 @@ from tqdm import tqdm
 if os.path.abspath('..') not in sys.path:
     sys.path.insert(0, os.path.abspath('..'))
 
-from utils import *
-from e_metrics import *
+from utils.utils import *
+from utils.e_metrics import *
 
 from models.mt import *
 
@@ -265,8 +265,8 @@ if __name__ == "__main__":
                   list_ch_B=[-1, 32, 64, 128, 256, 512],
                   d_state=16, d_conv=4, expand=2, channel_token=False)
         
-    elif args.model == 'Model_MTASP':  
-        trainer.setting.network = Model_MTAS1(in_ch=9, out_ch=1,
+    elif args.model == 'Model_MTASP':
+        trainer.setting.network = Model_MTASP(in_ch=9, out_ch=1,
                   list_ch_A=[-1, 16, 32, 64, 128, 256],
                   list_ch_B=[-1, 32, 64, 128, 256, 512],
                   d_state=16, d_conv=4, expand=2, channel_token=False)
