@@ -282,6 +282,9 @@ if __name__ == "__main__":
     else:
         raise ValueError('Invalid model type specified. Choose "Model" or "MambaModel".')
     
+    if not os.path.exists(trainer.setting.output_dir):
+        os.makedirs(trainer.setting.output_dir)
+
     # Load model weights
     trainer.init_trainer(ckpt_file=args.model_path,
                          list_GPU_ids=[args.GPU_id],
