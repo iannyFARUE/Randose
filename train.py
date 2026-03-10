@@ -205,6 +205,17 @@ if __name__ == '__main__':
         trainer.setting.loss_function = SharpDoseLoss()
     elif args.loss == 'Loss_DC_PTV':
         trainer.setting.loss_function = Loss_DC_PTV()
+    # Improvement 1: Boundary-Aware Loss variants (proposal eqs. 5-7)
+    elif args.loss == 'Loss_BoundaryAware':
+        # Morphological boundary shell (k=2), learnable w_boundary & w_gradient
+        trainer.setting.loss_function = Loss_BoundaryAware(
+            boundary_method='morph', boundary_thickness=2,
+            w_boundary=1.0, w_gradient=0.5)
+    elif args.loss == 'Loss_BoundaryAware_grad':
+        # Gradient-based boundary (Sobel on PTV mask)
+        trainer.setting.loss_function = Loss_BoundaryAware(
+            boundary_method='grad', boundary_thickness=2,
+            w_boundary=1.0, w_gradient=0.5)
 
 
     trainer.setting.online_evaluation_function_val = online_evaluation

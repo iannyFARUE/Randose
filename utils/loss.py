@@ -360,6 +360,156 @@ class Loss_DC_PTV(nn.Module):
             print("OAR region exists (non-zero).")
         else:
             print("OAR region is all zeros.")
-      
-     
+
+
         return total_loss
+
+
+# ── Improvement 1: Boundary-Aware Loss ────────────────────────────────────────
+#
+# Extends Loss_DC_PTV with two new terms (proposal eqs. 5-7):
+#
+#   L_Boundary = w_boundary · (1/|B|) Σ_{i∈B} |ŷ_i − y_i|   (eq. 5)
+#   L_Gradient = w_gradient · ‖∇ŷ − ∇y‖₁                    (eq. 6)
+#   L_Total    = L_L1 + L_PTV + L_OAR + L_Boundary + L_Gradient  (eq. 7)
+#
+# Boundary set B is extracted from the PTV mask using either:
+#   Method 1 — Morphological: B = M_PTV − (M_PTV ⊖ S_k)      (eq. 3)
+#   Method 2 — Gradient-based: B = ‖∇M_PTV‖ > 0              (eq. 4)
+
+class Loss_BoundaryAware(nn.Module):
+    """
+    Boundary-Aware Loss that adds explicit supervision at PTV surface voxels
+    and enforces gradient consistency across the whole dose volume.
+
+    Args:
+        boundary_method : 'morph'  — morphological shell (eq. 3)
+                          'grad'   — Sobel-gradient boundary (eq. 4)
+        boundary_thickness : shell radius k for morphological method (default 2)
+        w_boundary : initial weight for L_Boundary (learnable, default 1.0)
+        w_gradient : initial weight for L_Gradient (learnable, default 0.5)
+    """
+
+    def __init__(self,
+                 boundary_method: str = 'morph',
+                 boundary_thickness: int = 2,
+                 w_boundary: float = 1.0,
+                 w_gradient: float = 0.5):
+        super().__init__()
+
+        self.boundary_method = boundary_method
+        self.k = boundary_thickness
+
+        # Base region weights (learnable, matching Loss_DC_PTV)
+        self.PTV_weight = nn.Parameter(torch.tensor(1.0))
+        self.OAR_weight = nn.Parameter(torch.tensor(1.0))
+
+        # Boundary-specific weights (learnable — proposal §A.4)
+        self.w_boundary = nn.Parameter(torch.tensor(w_boundary))
+        self.w_gradient = nn.Parameter(torch.tensor(w_gradient))
+
+        self.L1 = nn.L1Loss(reduction='mean')
+
+        # ── Pre-build morphological structuring element (sphere of radius k) ──
+        size = 2 * self.k + 1
+        coords = torch.arange(size, dtype=torch.float32) - self.k
+        zz, yy, xx = torch.meshgrid(coords, coords, coords, indexing='ij')
+        sphere = ((xx ** 2 + yy ** 2 + zz ** 2) <= self.k ** 2).float()
+        # shape (1, 1, size, size, size) for F.conv3d
+        self.register_buffer('sphere_kernel', sphere.unsqueeze(0).unsqueeze(0))
+        self.sphere_sum = float(sphere.sum().item())
+
+        # ── 3D Sobel kernels (registered as buffers → auto device transfer) ──
+        # Gx: gradient along x (left-right)
+        Gx = torch.tensor(
+            [[[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]],
+             [[-2, 0, 2], [-4, 0, 4], [-2, 0, 2]],
+             [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]]], dtype=torch.float32)
+        # Gy: gradient along y (up-down)
+        Gy = torch.tensor(
+            [[[-1, -2, -1], [0, 0, 0], [1, 2, 1]],
+             [[-2, -4, -2], [0, 0, 0], [2, 4, 2]],
+             [[-1, -2, -1], [0, 0, 0], [1, 2, 1]]], dtype=torch.float32)
+        # Gz: gradient along z (depth)
+        Gz = torch.tensor(
+            [[[-1, -2, -1], [-2, -4, -2], [-1, -2, -1]],
+             [[ 0,  0,  0], [ 0,  0,  0], [ 0,  0,  0]],
+             [[ 1,  2,  1], [ 2,  4,  2], [ 1,  2,  1]]], dtype=torch.float32)
+        self.register_buffer('Gx', Gx.unsqueeze(0).unsqueeze(0))
+        self.register_buffer('Gy', Gy.unsqueeze(0).unsqueeze(0))
+        self.register_buffer('Gz', Gz.unsqueeze(0).unsqueeze(0))
+
+    # ── Boundary extraction ────────────────────────────────────────────────
+
+    def _boundary_morph(self, ptv: torch.Tensor) -> torch.Tensor:
+        """
+        Morphological shell: B = M_PTV − (M_PTV ⊖ S_k)   (eq. 3)
+        Returns a boolean mask of the same shape as ptv.
+        """
+        # Erosion via convolution: a voxel survives iff all sphere positions = 1
+        eroded = F.conv3d(ptv.float(), self.sphere_kernel, padding=self.k)
+        eroded = (eroded >= self.sphere_sum - 0.5).float()
+        return (ptv.float() - eroded) > 0.5
+
+    def _boundary_grad(self, ptv: torch.Tensor) -> torch.Tensor:
+        """
+        Gradient-based boundary: B = {‖∇M_PTV‖ > 0}   (eq. 4)
+        Returns a boolean mask of the same shape as ptv.
+        """
+        m = ptv.float()
+        gx = F.conv3d(m, self.Gx, padding=1)
+        gy = F.conv3d(m, self.Gy, padding=1)
+        gz = F.conv3d(m, self.Gz, padding=1)
+        return (gx ** 2 + gy ** 2 + gz ** 2) > 0
+
+    def _sobel_gradients(self, vol: torch.Tensor):
+        """Return (gx, gy, gz) Sobel gradients of a dose volume."""
+        gx = F.conv3d(vol, self.Gx, padding=1)
+        gy = F.conv3d(vol, self.Gy, padding=1)
+        gz = F.conv3d(vol, self.Gz, padding=1)
+        return gx, gy, gz
+
+    # ── Forward ───────────────────────────────────────────────────────────
+
+    def forward(self, pred, gt, PTVs, OAR):
+        gt_dose = gt[0]
+        possible_dose_mask = gt[1]
+
+        # ── L1 (global, within possible-dose region) ──────────────────────
+        pred_m = pred[possible_dose_mask > 0]
+        gt_m   = gt_dose[possible_dose_mask > 0]
+        L1_loss = self.L1(pred_m, gt_m)
+
+        # ── L_PTV ─────────────────────────────────────────────────────────
+        ptv_vox = PTVs > 0
+        L_ptv = (self.PTV_weight * self.L1(pred[ptv_vox], gt_dose[ptv_vox])
+                 if ptv_vox.any() else pred.new_tensor(0.0))
+
+        # ── L_OAR ─────────────────────────────────────────────────────────
+        oar_mask = (OAR.sum(dim=1, keepdim=True) > 0)
+        L_oar = (self.OAR_weight * self.L1(pred[oar_mask], gt_dose[oar_mask])
+                 if oar_mask.any() else pred.new_tensor(0.0))
+
+        # ── Boundary mask ─────────────────────────────────────────────────
+        if self.boundary_method == 'grad':
+            boundary_mask = self._boundary_grad(PTVs)
+        else:
+            boundary_mask = self._boundary_morph(PTVs)
+
+        # ── L_Boundary (eq. 5) ────────────────────────────────────────────
+        # Normalised by |B| (mean already does this)
+        L_boundary = (self.w_boundary * self.L1(pred[boundary_mask], gt_dose[boundary_mask])
+                      if boundary_mask.any() else pred.new_tensor(0.0))
+
+        # ── L_Gradient (eq. 6) ────────────────────────────────────────────
+        # ‖∇ŷ − ∇y‖₁  where ∇ = 3D Sobel
+        p_gx, p_gy, p_gz = self._sobel_gradients(pred)
+        g_gx, g_gy, g_gz = self._sobel_gradients(gt_dose)
+        grad_l1 = (torch.abs(p_gx - g_gx)
+                   + torch.abs(p_gy - g_gy)
+                   + torch.abs(p_gz - g_gz)).mean()
+        L_gradient = self.w_gradient * grad_l1
+
+        # ── Total (eq. 7) ─────────────────────────────────────────────────
+        total = L1_loss + L_ptv + L_oar + L_boundary + L_gradient
+        return total
