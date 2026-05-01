@@ -176,6 +176,13 @@ if __name__ == '__main__':
                   list_ch_B=[-1, 32, 64, 128, 256, 512],
                   d_state=16, d_conv=4, expand=2, channel_token=False)
 
+    elif args.model == 'Model_RANDose_MambaA_BiDir':
+        # Strategy A with BiDirectionalMamba: fwd+bwd scanning per axis (6 directions)
+        trainer.setting.network = Model_RANDose_MambaA_BiDir(in_ch=9, out_ch=1,
+                  list_ch_A=[-1, 16, 32, 64, 128, 256],
+                  list_ch_B=[-1, 32, 64, 128, 256, 512],
+                  d_state=16, d_conv=4, expand=2, channel_token=False)
+
     elif args.model == 'Model_RANDose_MambaVision':
         # MambaVision hybrid: SSM+symmetric-conv encoder, self-attention in final decoder stages
         trainer.setting.network = Model_RANDose_MambaVision(in_ch=9, out_ch=1,
@@ -227,6 +234,9 @@ if __name__ == '__main__':
     elif args.loss == 'Loss_AsymmetricPenumbra':
         trainer.setting.loss_function = Loss_AsymmetricPenumbra(
             n_steps=3, sigma=1.5, w_sdw_init=0.5, w_ext_init=1.0, w_cov_init=0.5)
+    elif args.loss == 'Loss_DVHProxy':
+        trainer.setting.loss_function = Loss_DVHProxy(
+            k_voxels=4, w_d95_init=1.0, w_dmean_init=0.5, w_d01cc_init=0.5)
 
 
     trainer.setting.online_evaluation_function_val = online_evaluation

@@ -21,7 +21,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from utils.se3d import ChannelSpatialSELayer3D
-from utils.mamba_3d import TriDirectionalMamba
+from utils.mamba_3d import TriDirectionalMamba, BiDirectionalMamba
 
 
 # ── Shared building blocks ──────────────────────────────────────────────────
@@ -280,6 +280,50 @@ class Model_RANDose_MambaA(nn.Module):
         return self.conv_out(self.net(x))
 
 
+class MSCSAMambaBlockA_BiDir(nn.Module):
+    """
+    Strategy A with BiDirectionalMamba (fwd+bwd per axis, 6 directions total).
+    Drop-in replacement for MSCSAMambaBlockA.
+    """
+
+    def __init__(self, in_ch: int, out_ch: int, stride: int,
+                 d_state: int = 16, use_mamba: bool = True):
+        super().__init__()
+        self.use_mamba = use_mamba
+
+        self.conv1 = nn.Conv3d(in_ch, out_ch, kernel_size=3, stride=stride, padding=1)
+        self.conv2 = nn.Conv3d(in_ch, out_ch, kernel_size=5, stride=stride, padding=2)
+        self.conv3 = nn.Conv3d(in_ch, out_ch, kernel_size=7, stride=stride, padding=3)
+        self.conv4 = nn.Conv3d(in_ch, out_ch, kernel_size=9, stride=stride, padding=4)
+        self.nonlin = nn.LeakyReLU(inplace=True)
+
+        if use_mamba:
+            self.mamba = BiDirectionalMamba(out_ch, d_state=d_state)
+
+        self.csa = ChannelSpatialSELayer3D(out_ch, reduction_ratio=2)
+
+        self.shortcut = (
+            nn.Conv3d(in_ch, out_ch, kernel_size=1, stride=stride)
+            if in_ch != out_ch or stride != 1 else None
+        )
+
+    def forward(self, x):
+        msfe = (self.nonlin(self.conv1(x))
+                + self.nonlin(self.conv2(x))
+                + self.nonlin(self.conv3(x))
+                + self.nonlin(self.conv4(x)))
+
+        if self.use_mamba:
+            msfe = self.mamba(msfe)
+
+        out = self.csa(msfe)
+
+        if self.shortcut is not None:
+            out = out + self.shortcut(x)
+
+        return out
+
+
 class Model_RANDose_MambaB(nn.Module):
     """
     RANDose + Strategy B Mamba integration (Parallel, eq. 12).
@@ -289,6 +333,22 @@ class Model_RANDose_MambaB(nn.Module):
                  d_state=16, d_conv=4, expand=2, channel_token=False):
         super().__init__()
         self.net = BaseUNet(MSCSAMambaBlockB, in_ch, list_ch_A, d_state)
+        self.conv_out = nn.Conv3d(list_ch_A[1], out_ch, kernel_size=1, bias=True)
+
+    def forward(self, x):
+        return self.conv_out(self.net(x))
+
+
+class Model_RANDose_MambaA_BiDir(nn.Module):
+    """
+    RANDose + Strategy A with BiDirectionalMamba (6-direction scanning).
+    Bidirectional context matches the physics of dose deposition — a voxel's
+    dose depends on structures both upstream and downstream in every axis.
+    """
+    def __init__(self, in_ch, out_ch, list_ch_A, list_ch_B,
+                 d_state=16, d_conv=4, expand=2, channel_token=False):
+        super().__init__()
+        self.net = BaseUNet(MSCSAMambaBlockA_BiDir, in_ch, list_ch_A, d_state)
         self.conv_out = nn.Conv3d(list_ch_A[1], out_ch, kernel_size=1, bias=True)
 
     def forward(self, x):

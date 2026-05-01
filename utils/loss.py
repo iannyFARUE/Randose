@@ -607,3 +607,101 @@ class Loss_AsymmetricPenumbra(nn.Module):
                  + self.w_ext.abs() * L_exterior
                  + self.w_cov.abs() * L_coverage)
         return total
+
+
+class Loss_DVHProxy(nn.Module):
+    """
+    DVH-Proxy Loss: closes the train/eval gap by directly optimising
+    differentiable surrogates of the DVH metrics used in evaluation.
+
+    L_Total = L_base + |w_d95|·L_D95 + |w_dmean|·L_Dmean + |w_d01cc|·L_D01cc
+
+    L_base   : L1_mask + w_PTV·L_PTV + w_OAR·L_OAR  (same as Loss_DC_PTV)
+    L_D95    : mean(relu(0.95·PTVs − pred)[PTVs > 0])  — PTV coverage hinge
+    L_Dmean  : (1/N) Σ mean(pred[OAR_i])              — minimise mean OAR dose
+    L_D01cc  : (1/N) Σ topk(pred[OAR_i], k=4).mean() — minimise near-max OAR dose
+
+    k=4 matches 0.1cc at 3mm isotropic voxel spacing (0.1cc / 27mm³ ≈ 3.7 → 4).
+    Threshold uses element-wise 0.95·PTVs so PTV70/63/56 each get the correct
+    per-prescription threshold (0.95 / 0.855 / 0.76) in normalised dose space.
+    """
+
+    def __init__(self,
+                 k_voxels: int = 4,
+                 w_d95_init: float = 1.0,
+                 w_dmean_init: float = 0.5,
+                 w_d01cc_init: float = 0.5):
+        super().__init__()
+        self.k = k_voxels
+
+        self.PTV_weight = nn.Parameter(torch.tensor(1.0))
+        self.OAR_weight = nn.Parameter(torch.tensor(1.0))
+        self.w_d95   = nn.Parameter(torch.tensor(w_d95_init))
+        self.w_dmean = nn.Parameter(torch.tensor(w_dmean_init))
+        self.w_d01cc = nn.Parameter(torch.tensor(w_d01cc_init))
+
+        self.L1 = nn.L1Loss(reduction='mean')
+
+    def _l_d95(self, pred, PTVs):
+        ptv_mask = PTVs > 0
+        if not ptv_mask.any():
+            return pred.new_tensor(0.0)
+        threshold = 0.95 * PTVs
+        return F.relu(threshold - pred)[ptv_mask].mean()
+
+    def _l_dmean(self, pred, OAR):
+        total = pred.new_tensor(0.0)
+        n_present = 0
+        for ch in range(OAR.shape[1]):
+            oar_mask = OAR[:, ch:ch+1, :, :, :] > 0
+            if not oar_mask.any():
+                continue
+            total += pred[oar_mask].mean()
+            n_present += 1
+        return pred.new_tensor(0.0) if n_present == 0 else total / n_present
+
+    def _l_d01cc(self, pred, OAR):
+        total = pred.new_tensor(0.0)
+        n_present = 0
+        for ch in range(OAR.shape[1]):
+            oar_mask = OAR[:, ch:ch+1, :, :, :] > 0
+            if not oar_mask.any():
+                continue
+            oar_vals = pred[oar_mask]
+            k_eff = min(self.k, oar_vals.numel())
+            total += torch.topk(oar_vals, k=k_eff, largest=True, sorted=False).values.mean()
+            n_present += 1
+        return pred.new_tensor(0.0) if n_present == 0 else total / n_present
+
+    def forward(self, pred, gt, PTVs, OAR):
+        device = pred.device
+        gt_dose            = gt[0].to(device)
+        possible_dose_mask = gt[1].to(device)
+        PTVs = PTVs.to(device)
+        OAR  = OAR.to(device)
+
+        # ── L_base (mirrors Loss_DC_PTV) ─────────────────────────────────
+        pred_m  = pred[possible_dose_mask > 0]
+        gt_m    = gt_dose[possible_dose_mask > 0]
+        L1_loss = self.L1(pred_m, gt_m)
+
+        ptv_mask = PTVs > 0
+        L_ptv = (self.PTV_weight * self.L1(pred[ptv_mask], gt_dose[ptv_mask])
+                 if ptv_mask.any() else pred.new_tensor(0.0))
+
+        oar_mask = OAR.sum(dim=1, keepdim=True) > 0
+        L_oar = (self.OAR_weight * self.L1(pred[oar_mask], gt_dose[oar_mask])
+                 if oar_mask.any() else pred.new_tensor(0.0))
+
+        L_base = L1_loss + L_ptv + L_oar
+
+        # ── DVH proxy terms ───────────────────────────────────────────────
+        L_d95   = self._l_d95(pred, PTVs)
+        L_dmean = self._l_dmean(pred, OAR)
+        L_d01cc = self._l_d01cc(pred, OAR)
+
+        total = (L_base
+                 + self.w_d95.abs()   * L_d95
+                 + self.w_dmean.abs() * L_dmean
+                 + self.w_d01cc.abs() * L_d01cc)
+        return total
